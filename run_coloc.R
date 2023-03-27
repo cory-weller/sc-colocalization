@@ -10,6 +10,254 @@ library(ggthemes)
 library(viridis)
 library(coloc)
 
+
+eQTL_coloc_SNPs_file <- 'data/eQTL_colocalization_SNPs.tsv'
+eQTL_GWAS <- fread(eQTL_coloc_SNPs_file)
+setkey(eQTL_GWAS, TISSUE, CHR, BP)
+
+diagnosis_coloc_SNPs_file <- 'data/diagnosis_colocalization_SNPs.tsv'
+DIAGNOSIS_GWAS <- fread(diagnosis_coloc_SNPs_file)
+setkey(DIAGNOSIS_GWAS, DIAGNOSIS, CHR, BP)
+
+
+COLOC_CLUSTERS_FILE <- '/gpfs/gsfs9/users/wellerca/sc-colocalization/data/clusters_extended.tsv'
+COLOC_CLUSTERS <- fread(COLOC_CLUSTERS_FILE)[cM_threshold==0.2]
+setkey(COLOC_CLUSTERS, GWAS, CHR, cluster)
+
+diagnosis_grps <- unique(COLOC_CLUSTERS$GWAS)
+TISSUES <- unique(eQTL_GWAS$TISSUE)
+
+
+run_coloc <- function(eQTL.DT, diagnosis.DT) {
+    d <- copy(diagnosis.DT)    # subset by chromosome
+    d[, SNP := paste0(CHR, '_', BP)]
+    diagnosis <- list()
+    diagnosis$position <- d$BP
+    diagnosis$snp <- d$SNP
+    diagnosis$beta <- d$BETA
+    diagnosis$varbeta <- d$SE^2
+    diagnosis$type <- 'cc'
+
+    e <- copy(eQTL.DT)
+    e[, SNP := paste0(CHR, '_', BP)]
+    eQTL <- list()
+    eQTL$position <- e$BP
+    eQTL$snp <- e$SNP
+    eQTL$beta <- e$B
+    eQTL$varbeta <- e$SE^2
+    eQTL$type <- 'quant'
+    eQTL$sdY <- rep(1, length(eQTL$snp))
+
+    res <- coloc.abf(diagnosis, eQTL)
+    res <- res$results
+    setDT(res)
+    return(res)
+}
+
+
+dt.all <- foreach(diagnosis=COLOC_CLUSTERS$GWAS,
+        CHROM=COLOC_CLUSTERS$CHR,
+        start=COLOC_CLUSTERS$extended_bp_start,
+        stop=COLOC_CLUSTERS$extended_bp_stop,
+        .combine='rbind', .errorhandling='remove') %do% {
+            diagnosis_gwas <- DIAGNOSIS_GWAS[.(diagnosis, CHROM)][BP %between% c(start, stop)]
+            o <- foreach(tissue=TISSUES, .combine='rbind', .errorhandling='remove') %do% {
+                eQTL_gwas <- eQTL_GWAS[.(tissue, CHROM)][BP %between% c(start, stop)]
+                coloc.dt <- run_coloc(eQTL_gwas, diagnosis_gwas)
+                coloc.dt[, 'diagnosis' := diagnosis]
+                coloc.dt[, 'tissue' := tissue]
+                return(coloc.dt)
+            }
+}
+
+dt.all <- unique(dt.all)
+dt.all[, c('CHR','BP') := tstrsplit(snp, split='_')]
+dt.all[, CHR := as.numeric(CHR)]
+dt.all[, BP := as.numeric(BP)]
+
+fwrite(dt.all, file='data/coloc_ALL.tsv', row.names=F, col.names=T, sep='\t', quote=FALSE)
+
+dt.formatted <- dt.all[, .SD, .SDcols=c('diagnosis','tissue','CHR','BP','SNP.PP.H4')]
+setnames(dt.formatted, 'SNP.PP.H4', 'PP')
+dt.formatted[PP > 0.95]
+
+
+quit(status=0)
+
+### END HERE
+
+
+
+
+# Take the most significant probe (or gene, same result) per SNP
+# Assumption that SNP influences only one gene
+# eQTLs <- eQTLs[eQTLs[, .I[which.min(P)], by=list(CHR,BP)]$V1]
+
+# Sort on keys
+setkey(eQTLs, CHR, BP)
+# function the same as:
+# eQTLs <-  eQTLs[order(CHR,BP)]
+
+
+eQTLs[, 'TISSUE' := TISSUE]
+
+diagnosis_clusters <- copy(all_clusters[GWAS==diagnosis
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DISEASE_GWAS_COLS <- c('SNP','CHR','BP','A1','A2','BETA','FRQ','SE','P')
+eQT_GWAS_COLS <- 
+
+# Read in .bed file containing recombination rates
+# Rquired column headers are chr (chromosome); start; stop; c (recombination rate, in units of cM/Mb)
+bed <- fread(file = RECOMBINATION_BED_FILE,
+              header = TRUE,
+              showProgress = FALSE,
+              col.names = c("CHR","BP","c","cM")
+)
+bed[, c := NULL]
+
+setkey(bed, CHR, BP)
+bed_extension <- bed[, list('BP'=max(BP)*1.1, 'cM'=max(cM)), by=CHR]
+bed <- rbindlist(list(bed, bed_extension))
+setkey(bed, CHR, BP)
+
+
+# Generate functions (cM ~ BP) to translate base pair position to units of cM
+cM_to_POS <- new.env()
+POS_to_cM <- new.env()
+for(chr in unique(bed[,CHR])) {
+    cM_to_POS[[as.character(chr)]] <- approxfun(y=c(0, bed[CHR==chr][,BP]), x=c(0,bed[CHR==chr][,cM]), ties='ordered')
+    POS_to_cM[[as.character(chr)]] <- approxfun(x=c(0, bed[CHR==chr][,BP]), y=c(0,bed[CHR==chr][,cM]), ties='ordered')
+}
+
+
+
+
+
+# get_linkage_window <- function(DT.disease, DT.eQTL, DT.linkage, chr, pos) {
+#     setnames(DT.linkage, c('CHR','POS','RATE','cM'))
+#     original_cM <- DT.linkage[CHR==chr & POS==pos][['position']]
+#     cM_window <- DT.linkage[CHR==chr & POS %between% c((pos-1), (pos+1))][['POS']]
+#     min_cM <- min(cM_window)
+#     max_cM <- max(cM_window)
+#     return(cM_window)
+#     #return(c(min_cm, max_cm))
+# }
+
+# get_linkage_window(linkage, linkage, linkage, 1, 61551035)
+
+
+For colocalization analyses, we included data from eQTL and disease GWAS within one map unit (centimorgan, cM) of a 
+
+map units
+
+
+# Read in .bed file containing recombination rates
+# Rquired column headers are chr (chromosome); start; stop; c (recombination rate, in units of cM/Mb)
+bed <- fread(file = RECOMBINATION_BED_FILE,
+              header = TRUE,
+              showProgress = FALSE,
+              col.names = c("chr","pos","c","cM")
+)
+
+# bed <- bed[chr==CHROM]
+setkey(bed, chr, pos)
+
+# take latest value of cM
+# bed[ !duplicated(bed[, c("cM")], fromLast=T),][order(chr, pos, cM)]
+
+
+# Generate functions (cM ~ BP) to translate base pair position to units of cM
+cM_to_POS <- new.env()
+POS_to_cM <- new.env()
+
+# Create recombination function based on .bed file
+for(chr.i in unique(bed[,chr])) {
+    cM_to_POS[[as.character(chr.i)]] <- approxfun(y=c(0, bed[chr==chr.i][,pos]), x=c(0,bed[chr==chr.i][,cM]), ties='ordered')
+    POS_to_cM[[as.character(chr.i)]] <- approxfun(x=c(0, bed[chr==chr.i][,pos]), y=c(0,bed[chr==chr.i][,cM]), ties='ordered')
+}
+
+
+cM_to_POS[['1']](47.29347)
+POS_to_cM[['1']](24892280)
+
+
+Predicted positional cM by linearly interpolating map units from Broad Institute Hg38 linkage map. 
+
+bed[chr==1, pos]
+dt <- data.table(actual_cM = bed[chr==1,cM],
+           predicted_cM =recombination_function[['1']](bed[chr==1, pos]))
+
+ggplot(data=dt, aes(x=actual_cM, y=predicted_cM)) + geom_point() 
+
+ggplot(bed, 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+get_eQTL <- function(datadir, tissue, chr) {
+    eQTL_fn <- paste0(datadir, '/', tissue, '_', chr, '.tsv.gz')
+    fread(eQTL_fn)
+}
+
+tissue <- 'Cortex-EUR'
+chr <- 21
+
+dat <- get_eQTL(eQTL_datadir, tissue, chr)
+
+
+
+
 # read in formatted summary statistics - gr38
 
 # AD_fn <- 'data/AD_Bellenguez.formatted.tsv.gz'
@@ -408,12 +656,6 @@ overlaps[, c("start","stop","i.stop","id","id2") := NULL]
 setnames(overlaps, "i.start", "POS")
 setkey(overlaps, GeneID)
 overlaps[, gn := rleid(GeneID)]
-
-
-
-
-
-
 
 
 

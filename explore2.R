@@ -10,6 +10,114 @@ library(ggthemes)
 library(viridis)
 library(coloc)
 
+CHROM <- 21
+eQTL_datadir <- '/data/CARD/projects/singlecell_humanbrain/coloc_20230322'
+
+RECOMBINATION_BED_FILE <- 'genetic_map_hg38_withX.txt.gz'
+
+
+get_linkage_window <- function(DT.disease, DT.eQTL, DT.linkage, chr, pos) {
+    setnames(DT.linkage, c('CHR','POS','RATE','cM'))
+    original_cM <- DT.linkage[CHR==chr & POS==pos][['position']]
+    cM_window <- DT.linkage[CHR==chr & POS %between% c((pos-1), (pos+1))][['POS']]
+    min_cM <- min(cM_window)
+    max_cM <- max(cM_window)
+    return(cM_window)
+    #return(c(min_cm, max_cm))
+}
+
+get_linkage_window(linkage, linkage, linkage, 1, 61551035)
+
+
+For colocalization analyses, we included data from eQTL and disease GWAS within one map unit (centimorgan, cM) of a 
+
+map units
+
+
+# Read in .bed file containing recombination rates
+# Rquired column headers are chr (chromosome); start; stop; c (recombination rate, in units of cM/Mb)
+bed <- fread(file = RECOMBINATION_BED_FILE,
+              header = TRUE,
+              showProgress = FALSE,
+              col.names = c("chr","pos","c","cM")
+)
+
+# bed <- bed[chr==CHROM]
+setkey(bed, chr, pos)
+
+# take latest value of cM
+# bed[ !duplicated(bed[, c("cM")], fromLast=T),][order(chr, pos, cM)]
+
+
+# Generate functions (cM ~ BP) to translate base pair position to units of cM
+cM_to_POS <- new.env()
+POS_to_cM <- new.env()
+
+# Create recombination function based on .bed file
+for(chr.i in unique(bed[,chr])) {
+    cM_to_POS[[as.character(chr.i)]] <- approxfun(y=c(0, bed[chr==chr.i][,pos]), x=c(0,bed[chr==chr.i][,cM]), ties='ordered')
+    POS_to_cM[[as.character(chr.i)]] <- approxfun(x=c(0, bed[chr==chr.i][,pos]), y=c(0,bed[chr==chr.i][,cM]), ties='ordered')
+}
+
+
+cM_to_POS[['1']](47.29347)
+POS_to_cM[['1']](24892280)
+
+
+Predicted positional cM by linearly interpolating map units from Broad Institute Hg38 linkage map. 
+
+bed[chr==1, pos]
+dt <- data.table(actual_cM = bed[chr==1,cM],
+           predicted_cM =recombination_function[['1']](bed[chr==1, pos]))
+
+ggplot(data=dt, aes(x=actual_cM, y=predicted_cM)) + geom_point() 
+
+ggplot(bed, 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+get_eQTL <- function(datadir, tissue, chr) {
+    eQTL_fn <- paste0(datadir, '/', tissue, '_', chr, '.tsv.gz')
+    fread(eQTL_fn)
+}
+
+tissue <- 'Cortex-EUR'
+chr <- 21
+
+dat <- get_eQTL(eQTL_datadir, tissue, chr)
+
+
+
+
 # read in formatted summary statistics - gr38
 
 # AD_fn <- 'data/AD_Bellenguez.formatted.tsv.gz'
@@ -408,12 +516,6 @@ overlaps[, c("start","stop","i.stop","id","id2") := NULL]
 setnames(overlaps, "i.start", "POS")
 setkey(overlaps, GeneID)
 overlaps[, gn := rleid(GeneID)]
-
-
-
-
-
-
 
 
 
