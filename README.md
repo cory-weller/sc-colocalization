@@ -47,6 +47,82 @@ Rscript subset_diagnosis_gwas.R
 Rscript run_coloc.R
 ```
 
+Generating filtered 
+```bash
+filterPvalByAwk() {
+    local infile=${1}
+    local p_val_column=${2}
+    local p_val_threshold=${3}
+    zcat ${infile} | \
+    awk -v col="${p_val_column}" \
+        -v threshold="${p_val_threshold}" \
+        'N == 1 || ($col + 0) < threshold'
+}
+
+datadir='/gpfs/gsfs9/users/CARD/projects/singlecell_humanbrain/coloc_20230322'
+
+
+# Filtering eQTL GWAS files to only include SNPs with P < 1E-4
+cd ~/sc-colocalization/data
+TISSUES=(Basalganglia-EUR Cerebellum-EUR Cortex-AFR Cortex-EUR Hippocampus-EUR Spinalcord-EUR)
+
+for tissue in ${TISSUES[@]}; do
+    for chr in $(seq 1 21); do
+        echo "$tissue chr${chr}"
+        filename=${datadir}/${tissue}_${chr}.tsv.gz
+        filterPvalByAwk ${filename} 14 '1E-4' >> ${tissue}.allChr.signif.tsv
+    done
+done
+
+gzip *.allChr.signif.tsv
+eQTL_filename <- paste0('', TISSUE, '.allChr.signif.tsv.gz')
+NDD_filename <- 
+```
+
+```bash
+
+filterPvalByR() {
+Rscript - ${1} ${2} ${3} <<EOF
+    #!/usr/bin/env Rscript
+    library(data.table)
+    args <- commandArgs(trailingOnly=TRUE)
+    infile <- args[1]
+    threshold <- as.numeric(args[2])
+    outfile <- args[3]
+
+    dat <- fread(infile)
+    desired_cols <- c('SNP','CHR','BP','A1','A2','BETA','FRQ','SE','P')
+    dat <- dat[P < threshold, .SD, .SDcols=desired_cols]
+    fwrite(dat, file=outfile, quote=F, row.names=F, col.names=T, sep='\t')
+EOF
+}
+
+datadir='/gpfs/gsfs8/users/CARD_AA/projects/2022_10_CA_singlecell_humanbrain/data/final_formatted_sumstats'
+outdir='/gpfs/gsfs9/users/wellerca/sc-colocalization/data/NDD'
+threshold='5E-8'
+
+for infile in ${datadir}/*; do
+    outfile=$(basename ${infile%.formatted.tsv}.signif.tsv)
+    filterPvalByR ${infile} ${threshold} ${outdir}/${outfile}
+done
+
+```
+
+
+
+```
+
+```
+
+
+
+
+```
+awk -v col='14' \
+    -v threshold='1E-4' \
+    '($col + 0) < threshold' \
+    10_eQTL_all_SNPs.tsv | head
+
 ./smr-1.3.1 --descriptive-cis --beqtl-summary /data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Basalganglia-EUR/2020-05-26-Basalganglia-EUR-10-SMR-besd --out Basalganglia-EUR-10-
 ```
 AD_Bellenguez.formatted.tsv.gz
