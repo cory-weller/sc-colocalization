@@ -1,45 +1,60 @@
 # sc-colocalization
 
-Generating full SNP results files from besd
+Generate full tissue eQTL GWAS files using [`submitSMR.sh`](src/submitSMR.sh). Importantly, the
+script calls a `smr-1.3.1` binary with `--descriptive-cis` `--beqtl-summary` to generate output,
+and `--query 1` to include
+    
+## Collecting significant tissue (eQTL GWAS) data
+This loop iterates through (tissue) x (chromosomes 1:22) to query compressed `.besd` files. Records
+passing the defined p-value significance threshold (in this case `1e-4`) are concatenated into a
+single `${tissue}.signif.tsv.gz` file per tissue type, written to `data/TISSUE_eQTL`.
+
 ```bash
-module load SMR
-smr --beqtl-summary $SMR_DIR/TEST_DATA/westra_eqtl_hg18 --query 5.0e-8 --snp rs123
-
-
-https://hpc.nih.gov/apps/SMR.html#:~:text=SMR%20(Summary%2Dbased%20Mendelian%20Randomization,complex%20trait%20because%20of%20pleiotropy.
-
-https://cran.r-project.org/web/packages/coloc/vignettes/a02_data.html
-
-/data/CARD_AA/projects/2022_10_CA_singlecell_humanbrain/data/final_formatted_sumstats
-
-datadir='/data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Cerebellum-EUR/'
-
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-10-SMR-besd --query 1
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-11-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-12-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-13-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-14-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-15-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-16-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-17-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-18-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-19-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-1-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-20-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-21-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-22-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-2-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-3-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-4-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-5-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-6-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-7-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-8-SMR-besd
-smr --descriptive-cis --beqtl-summary ${datadir}/2020-05-26-Cerebellum-EUR-9-SMR-besd
+TISSUES=(Basalganglia-EUR Cerebellum-EUR Cortex-AFR Cortex-EUR Hippocampus-EUR Spinalcord-EUR)
+THRESHOLD='1e-4'
+for tissue in ${TISSUES[@]}; do
+    bash src/retrieve-smr.sh ${tissue} ${THRESHOLD}
+done
 ```
 
-Subset eQTL GWAS tables to only those needed for colocalization, generating `data/eQTL_colocalization_SNPs.tsv` 
-and `data/eQTL_colocalization_SNPs.tsv`
+
+## Collecting significant NDD GWAS data
+This loop iterates through `${DATADIR}`, which currently contains multiple NDD GWAS files with
+varied column order and ID. The function `filterPvalByR` envokes an `R` heredoc to read in the
+complete GWAS, then output a consistent set of columns, with rows filtered by p-value significance.
+
+```bash
+filterPvalByR() {
+Rscript - ${1} ${2} ${3} <<EOF
+    #!/usr/bin/env Rscript
+    library(data.table)
+    args <- commandArgs(trailingOnly=TRUE)
+    infile <- args[1]
+    threshold <- as.numeric(args[2])
+    outfile <- args[3]
+
+    dat <- fread(infile)
+    desired_cols <- c('SNP','CHR','BP','A1','A2','BETA','FRQ','SE','P')
+    dat <- dat[P < threshold, .SD, .SDcols=desired_cols]
+    fwrite(dat, file=outfile, quote=F, row.names=F, col.names=T, sep='\t')
+EOF
+}
+
+DATADIR='/gpfs/gsfs8/users/CARD_AA/projects/2022_10_CA_singlecell_humanbrain/data/final_formatted_sumstats'
+OUTDIR='/gpfs/gsfs9/users/wellerca/sc-colocalization/data/NDD'
+THRESHOLD='5E-8'
+
+for infile in ${DATADIR}/*; do
+    outfile=$(basename ${infile%.formatted.tsv}.signif.tsv)
+    filterPvalByR ${infile} ${THRESHOLD} ${OUTDIR}/${outfile}
+done
+```
+
+## Defining clusters for colocalization analysis
+
+## Running iterative colocalization
+
+
 ```bash
 Rscript find_clusters.R
 Rscript subset_eQTL_gwas.R
@@ -81,30 +96,6 @@ NDD_filename <-
 
 ```bash
 
-filterPvalByR() {
-Rscript - ${1} ${2} ${3} <<EOF
-    #!/usr/bin/env Rscript
-    library(data.table)
-    args <- commandArgs(trailingOnly=TRUE)
-    infile <- args[1]
-    threshold <- as.numeric(args[2])
-    outfile <- args[3]
-
-    dat <- fread(infile)
-    desired_cols <- c('SNP','CHR','BP','A1','A2','BETA','FRQ','SE','P')
-    dat <- dat[P < threshold, .SD, .SDcols=desired_cols]
-    fwrite(dat, file=outfile, quote=F, row.names=F, col.names=T, sep='\t')
-EOF
-}
-
-datadir='/gpfs/gsfs8/users/CARD_AA/projects/2022_10_CA_singlecell_humanbrain/data/final_formatted_sumstats'
-outdir='/gpfs/gsfs9/users/wellerca/sc-colocalization/data/NDD'
-threshold='5E-8'
-
-for infile in ${datadir}/*; do
-    outfile=$(basename ${infile%.formatted.tsv}.signif.tsv)
-    filterPvalByR ${infile} ${threshold} ${outdir}/${outfile}
-done
 
 ```
 
