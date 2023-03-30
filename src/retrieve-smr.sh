@@ -27,7 +27,7 @@ retrieve_smr() {
     if [ ! -f "${OUTDIR}/${TISSUE}.tsv" ]; then
         cat ${TISSUE}_${chr}.txt > ${OUTDIR}/${TISSUE}.tsv
     else
-        awk 'NR > 1' ${TISSUE}_${chr}.txt >> ${OUTDIR}/${TISSUE}.tsv
+        awk 'NR > 1' ${TISSUE}_${chr}.txt >> ${OUTDIR}/${TISSUE}.signif.tsv
     fi
         rm ${TISSUE}_${chr}.txt
 }
