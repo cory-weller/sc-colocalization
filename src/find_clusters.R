@@ -5,14 +5,13 @@ library(foreach)
 library(ggplot2)
 library(ggthemes)
 
-DISEASE_GWAS_FILES <- list.files(path='/data/CARD_AA/projects/2022_10_CA_singlecell_humanbrain/data/final_formatted_sumstats/',
-                                    pattern='*.formatted.tsv',
-                                    full.names=T)
+#### ARGS ##########################################################################################
+args <- commandArgs(trailingOnly=TRUE)
+GWAS_FILENAME <- args[1]
+RECOMBINATION_BED_FILE <- args[2]
+OUTDIR=paste0(dirname(GWAS_FILENAME), '/clusters')
 
-RECOMBINATION_BED_FILE <- '/gpfs/gsfs9/users/wellerca/sc-colocalization/data/genetic_map_hg38_withX.txt.gz'
-
-GWAS_P_THRESHOLD <- 5e-8
-cM_THRESHOLD <- 0.2
+#### FUNCTIONS #####################################################################################
 
 import_recombination_bed <- function(filename) {
     # Read in .bed file containing recombination rates
@@ -62,7 +61,6 @@ get_gwas_filestem <- function(filename) {
 get_gwas_hits <- function(gwas_filename) {
     dat <- fread(gwas_filename)
     setnames(dat, toupper(colnames(dat)))
-    dat <- dat[P <= GWAS_P_THRESHOLD]
     setkey(dat, CHR, BP)
 
 
@@ -103,79 +101,97 @@ get_clusters <- function(DT, cM_threshold) {
               'cM_stop'=max(cM),
               'nSNPs_in_cluster'=.N), by=list(CHR,cluster)]
     
-    # o3[, cM_width := cM_stop - cM_start]
-    # o3[, bp_width := bp_stop - bp_start]
     o3[, 'cM_threshold' := cM_threshold]
     return(o3)
-
-    # # Does not run--code block for manual debugging/wrangling
-    # if(FALSE) {
-    #     # Assign label for first/last BP of group
-    #     o2[o2[, .I[which.min(BP)], by=grp]$V1, ggLabel := BP]
-    #     o2[o2[, .I[which.max(BP)], by=grp]$V1, ggLabel := BP]
-
-
-    #     g <- ggplot(o2, aes(x=cM, y=1, label=ggLabel, color=as.factor(chrGrp))) +
-    #     geom_point() +
-    #     geom_text_repel() +
-    #     facet_grid(CHR~.) +
-    #     theme_few()
-    # }
-    # if(write_output) {
-    #     fwrite(o3, file=paste0(gwas_name, '.cluster_windows.tsv'), quote=F, row.names=F, col.names=T, sep='\t')
-    # } else {
-    #     return(o3)
-    # }
 }
 
 extend_clusters <- function(DT, cM_to_extend) {
     o <- foreach(chr=1:21, .combine='rbind') %do% {
         dat.sub <- copy(DT[CHR==chr])
-        dat.sub[, extended_bp_start := cM_to_pos[[as.character(chr)]](cM_start - 0.5)]
-        dat.sub[, extended_bp_stop := cM_to_pos[[as.character(chr)]](cM_start + 0.5)]
+        dat.sub[, extended_bp_start := cM_to_pos[[as.character(chr)]](cM_start - cM_to_extend)]
+        dat.sub[, extended_bp_start := floor(extended_bp_start)]    # down to nearest integer
+        dat.sub[is.na(extended_bp_start), extended_bp_start := 1]   # use start of chr if NA
+        dat.sub[, extended_bp_stop := cM_to_pos[[as.character(chr)]](cM_start + cM_to_extend)]
+        dat.sub[, extended_bp_stop := ceiling(extended_bp_stop)]    # up to nearest integer
+        dat.sub[is.na(extended_bp_stop), extended_bp_stop := 3e8]   # use sufficiently large value to include end of chr if NA
         return(dat.sub)
     }
+    return(o)
 }
 
 
+#### RUN ###########################################################################################
+
+# Import recombination rates
 bed <- import_recombination_bed(RECOMBINATION_BED_FILE)
+
+# Build cM <-> BP functions
 pos_to_cM <- build_pos_to_cM(bed)
 cM_to_pos <- build_cM_to_pos(bed)
 
+# Import gwas data
+signif_snps <- get_gwas_hits(GWAS_FILENAME)
+GWAS_NAME <- get_gwas_filestem(GWAS_FILENAME)
+OUT_STEM=paste0(OUTDIR,'/',GWAS_NAME)
 
-o2 <- foreach(gwas_filename = DISEASE_GWAS_FILES, .combine='rbind') %do% {
-    gwas_name <- get_gwas_filestem(gwas_filename)
-    signif_snps <- get_gwas_hits(gwas_filename)
-    o <- foreach(cM=c(0.01,0.02, 0.03, 0.04, seq(0.05, 1, 0.05)), .combine='rbind') %do% {
-        get_clusters(signif_snps, cM)
-    }
-    o[, 'GWAS' := gwas_name]
+# Test a range of cM values
+clusters <- foreach(cM=seq(0.01, 1, 0.01), .combine='rbind') %do% {
+    get_clusters(signif_snps, cM)
 }
+clusters[, 'GWAS' := GWAS_NAME]
 
-setkey(o2, GWAS, cM_threshold, CHR, cluster)
-desired_col_order <- c('GWAS', 'cM_threshold', 'cluster', 'CHR', 'bp_start', 'bp_stop', 'bp_width',
-                    'cM_start', 'cM_stop', 'cM_width','nSNPs_in_cluster')
+setkey(clusters, GWAS, cM_threshold, CHR, cluster)
+desired_col_order <- c('GWAS', 'cM_threshold', 'cluster', 'CHR', 'bp_start', 'bp_stop',
+                    'cM_start', 'cM_stop','nSNPs_in_cluster')
 
-clusters <- o2[, .SD, .SDcols=desired_col_order]
-fwrite(clusters, file='data/clusters.tsv', quote=F, row.names=F, col.names=T, sep='\t')
+clusters <- clusters[, .SD, .SDcols=desired_col_order]
+cluster_sizes <- clusters[, list('Clusters'=.N), by=list(cM_threshold)]
+setkey(cluster_sizes, cM_threshold)
 
-g <- ggplot(cluster_sizes.long[variable=='N_clusters'] , aes(x=cM_threshold, y=count)) +
+clusters_max <- max(cluster_sizes$Clusters)
+clusters_min <-  min(cluster_sizes$Clusters)
+cluster_N_range <-  clusters_max - clusters_min
+
+
+# c_min <- cluster_sizes[which.max(cM_threshold)]$Clusters
+# cluster_sizes[, ht := Clusters - c_min]
+# ht_sum <- sum(cluster_sizes$ht)
+
+cluster_sizes[, cumulative_frac := (clusters_max - Clusters)/cluster_N_range]
+
+selected_cM_threshold <- cluster_sizes[cumulative_frac >= 0.9][1,]$cM_threshold
+
+
+fwrite(clusters, file=paste0(OUT_STEM,'.clusters_all.tsv'), quote=F, row.names=F, col.names=T, sep='\t')
+
+g <- ggplot(cluster_sizes , aes(x=cM_threshold, y=Clusters)) +
     geom_point(shape=21) +
-    facet_wrap(~GWAS, nrow=2) +
-    theme_few() +
-    geom_vline(xintercept=0.2, alpha=0.4, linetype='dashed', color='red') +
-    theme(strip.placement = "outside") +
+    theme_few(8) +
     scale_x_continuous(breaks=seq(0,1,0.2), labels=c(0, 0.2, 0.4, 0.6, 0.8, 1)) +
-    labs(x='cM threshold to cluster adjacent SNPs',
+    labs(x='cM clustering threshold',
         y='Count',
-        title='Number of SNP clusters (across all chromosomes) for colocalization analysis')
+        title='Clusters across all chromosomes') +
+    ylim(0,NA)
 
-ggsave(g, file='data/colocalization_cluster_counts.png', width=25, height=12, units='cm')
+ggsave(g, file=paste0(OUT_STEM, '.clusters.png'), width=10, height=10, units='cm')
 
-clusters.extended <- extend_clusters(clusters[cM_threshold==0.2])
-fwrite(clusters.extended, file='data/clusters_extended.tsv', quote=F, row.names=F, col.names=T, sep='\t')
+g2 <- ggplot(cluster_sizes , aes(x=cM_threshold, y=cumulative_frac)) +
+    geom_hline(yintercept=0.9, alpha=0.5, linetype='dashed') +
+    geom_vline(xintercept=selected_cM_threshold, alpha=0.5, linetype='dashed', color='red') +
+    geom_point(shape=21) +
+    theme_few(8) +
+    scale_x_continuous(breaks=sort(unique(c(1,selected_cM_threshold)))) +
+    labs(x='cM clustering threshold',
+        y='Effective Reduction in Cluster Count') +
+    scale_y_continuous(breaks=seq(0,1,0.1), limits=c(0,NA))
 
-fwrite(clusters, file='data/clusters.tsv', quote=F, row.names=F, col.names=T, sep='\t')
+ggsave(g2, file=paste0(OUT_STEM, '.clusters_frac.png'), width=10, height=10, units='cm')
 
-cluster_sizes <- clusters[, list('N_clusters'=.N, 'N_singles'=sum(nSNPs_in_cluster==1)), by=list(cM_threshold, GWAS)]
-cluster_sizes.long <- melt(cluster_sizes, measure.vars=c('N_clusters','N_singles'), value.name='count')
+
+clusters <- extend_clusters(clusters[cM_threshold==selected_cM_threshold], selected_cM_threshold/2)
+
+fwrite(clusters, file=paste0(OUT_STEM, '.clusters_chosen.tsv'), quote=F, row.names=F, col.names=T, sep='\t')
+
+quit(status=0)
+
+

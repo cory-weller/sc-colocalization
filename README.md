@@ -50,17 +50,94 @@ for infile in ${DATADIR}/*; do
 done
 ```
 
+
 ## Defining clusters for colocalization analysis
+```bash
+RECOMBINATION_BED='data/genetic_map_hg38_withX.txt.gz'
+wget -O ${RECOMBINATION_BED} https://storage.googleapis.com/broad-alkesgroup-public/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
+NDD_FILES=($(ls data/NDD/*signif.tsv))
+
+for ndd_gwas in ${NDD_FILES[@]}; do
+    Rscript src/find_clusters.R ${ndd_gwas} ${RECOMBINATION_BED} ${cM_THRESHOLD}
+done
+```
 
 ## Running iterative colocalization
 
-
 ```bash
-Rscript find_clusters.R
-Rscript subset_eQTL_gwas.R
-Rscript subset_diagnosis_gwas.R
-Rscript run_coloc.R
+eQTL_FILES=($(ls data/eQTL/*signif.tsv.gz))
+NDD_FILES=($(ls data/NDD/*signif.tsv))
+
+for eQTL_file in ${eQTL_FILES[@]}; do 
+    for ndd_gwas in ${NDD_FILES[@]}; do
+        clusterfile="data/NDD/clusters/$(basename ${ndd_gwas[0]%.signif.tsv}.clusters_chosen.tsv)"
+        Rscript src/run-coloc.R ${eQTL_file} ${ndd_gwas} ${clusterfile}
+    done
+done
 ```
+
+## Combining results files
+```bash
+OUTFILE='data/coloc/ALL_COLOC.tsv'
+INFILES=($(ls data/coloc/*.tsv))
+
+if [ -f "${OUTFILE}" ]; then rm ${OUTFILE}; fi
+
+head -n 1 ${INFILES[0]} > ${OUTFILE}
+
+for file in ${INFILES[@]}; do
+    awk 'NR>1' ${file} >> ${OUTFILE}
+done
+```
+
+```R
+library(data.table)
+dat <- fread('data/coloc/ALL_COLOC.tsv')
+gids <- fread('data/coloc/GENEIDS.csv', col.names=c('PROBE','GENEID'))
+dat <- merge(dat, unique(gids), by='PROBE')
+setnames(dat, 'B', 'eQTL_B')
+
+desired_cols <- c('CHR','BP','NDD','TISSUE','GENEID','SNP.PP.H4','eQTL_B','PROBE','PROBE_BP','SNP','A1','A2','FREQ')
+dat.out <- dat[, .SD, .SDcols=desired_cols][order(CHR,BP,NDD,TISSUE)]
+fwrite(dat.out, file='coloc_formatted.tsv', quote=F, row.names=F, col.names=T, sep='\t')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 Generating filtered 
 ```bash
@@ -120,66 +197,6 @@ AD_Bellenguez.formatted.tsv.gz
 PD_Nalls.formatted.tsv.gz
 LBD_Chia.formatted.tsv.gz
 
-# Get linkage map
-
-wget https://storage.googleapis.com/broad-alkesgroup-public/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
 
 https://storage.googleapis.com/broad-alkesgroup-public/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
 
-
-dirs:
-/data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Basalganglia-EUR
-/data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Cerebellum-EUR
-/data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Cortex-AFR
-/data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Cortex-EUR
-/data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Hippocampus-EUR
-/data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Spinalcord-EUR
-
-celltypes=(Basalganglia-EUR Cerebellum-EUR Cortex-AFR Cortex-EUR Hippocampus-EUR Spinalcord-EUR)
-diagnoses=(AD PD LBD)
-
-For each celltype
-    For each chromosome
-        Submit job, request lscratch, cd to TMP
-        generate full SNP table for celltype eQTL
-        Start R
-        load eQTL into R
-        For each diagnosis (AD PD LBD)
-            load diagnosis GWAS into R
-            run coloc
-            output results to permanent dir
-
-
-GWAS files stored in
-```bash
-'/data/CARD_AA/projects/2022_10_CA_singlecell_humanbrain/outfiles'
-```
-
-filted to significant GWAS hits with:
-
-```R
-#!/usr/bin/env Rscript
-
-library(data.table)
-
-disease_gwas_files <- list.files(path='/data/CARD_AA/projects/2022_10_CA_singlecell_humanbrain/data/final_formatted_sumstats', full.names=T)
-signif_threshold <- 5e-8
-
-for(fn in disease_gwas_files) {
-    dat <- fread(fn)
-    base_filename <- basename(fn)
-    gwas_name <- strsplit(base_filename, split='\\.formatted')[[1]][1]
-    out_filename <- paste0(gwas_name, '.signif.tsv')
-
-    dat <- dat[P <= signif_threshold]
-    fwrite(dat, file=paste0('data/', out_filename), quote=F, row.names=F, col.names=T, sep='\t')
-}
-```
-
-In R, load in bed file (cM) and significant GWAS
-[, cM := to_cM(BP)]
-[, nextSNP := shift(BP, size=1L)]
-[, nextSNP_cM := to_cM(nextSNP)]
-[, cM_between_SNPs := nextSNP_cM - cM]
-[, tf := ifelse(cM_between_SNPs < 0.1, TRUE, FALSE)]    # TRUE if next SNP is within 0.1 cM, otherwise FALSE
-[, grp := rleid(CHR,tf)]                                # Assigns group ID based on continuous runs of CHR and tf

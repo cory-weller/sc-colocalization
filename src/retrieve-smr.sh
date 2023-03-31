@@ -4,7 +4,7 @@ TISSUE=${1}
 PVAL=${2}
 
 SMR='/data/CARD/projects/singlecell_humanbrain/coloc/smr-1.3.1'
-OUTDIR="/gpfs/gsfs9/users/wellerca/sc-colocalization/data/TISSUE_eQTL"
+OUTDIR="/gpfs/gsfs9/users/wellerca/sc-colocalization/data/eQTL"
 TMPDIR="/lscratch/${SLURM_JOB_ID}"
 eQTL_DIR='/data/CARD/projects/omicSynth/SMR_omics/eQTLs'
 FILESTEM="2020-05-26-${TISSUE}"

@@ -10,41 +10,71 @@ library(ggthemes)
 library(viridis)
 library(coloc)
 
-eQTL_threshold <- 1e-3
-diagnosis_threshold <- 1e-8
-args <- commandArgs(trailingOnly=TRUE)
-tissue <- args[1]
-diagnosis <- args[2]
+args <- commandArgs(trailingOnly=TRUE) #
 
-eQTL_coloc_SNPs_file <- 'data/eQTL_colocalization_all_SNPs.tsv'
-eQTL_GWAS <- fread(eQTL_coloc_SNPs_file)
-eQTL_GWAS <- eQTL_GWAS[TISSUE == tissue]
-eQTL_GWAS[,'rank' := frank(P), by=list(CHR, BP, TISSUE)]
-eQTL_GWAS <- eQTL_GWAS[P <= eQTL_threshold]
-eQTL_GWAS[, id := paste0(CHR,'-',BP,'-',TISSUE, '-', PROBE)]
+TISSUE_eQTL_FILENAME <- args[1]     # TISSUE_eQTL_FILENAME <- 'data/eQTL/Cortex-EUR.signif.tsv.gz'
+NDD_GWAS_FILENAME <- args[2]        # NDD_GWAS_FILENAME <- 'data/NDD/PD_Nalls.signif.tsv'
+NDD_CLUSTERS_FILENAME <- args[3]    # NDD_CLUSTERS_FILENAME <- 'data/NDD/clusters/PD_Nalls.clusters_chosen.tsv'
 
-# eQTL_GWAS <- eQTL_GWAS[eQTL_GWAS[, .I[which.min(P)], by=list(CHR,BP,TISSUE)]$V1]
-setkey(eQTL_GWAS, TISSUE, CHR, BP)
+TISSUE <- strsplit(basename(TISSUE_eQTL_FILENAME), split='\\.signif')[[1]][1]
+NDD <- strsplit(basename(NDD_GWAS_FILENAME), split='\\.signif')[[1]][1]
 
-diagnosis_coloc_SNPs_file <- 'data/diagnosis_colocalization_SNPs.tsv'
-DIAGNOSIS_GWAS <- fread(diagnosis_coloc_SNPs_file)
-DIAGNOSIS_GWAS <- DIAGNOSIS_GWAS[P <= diagnosis_threshold]
-setkey(DIAGNOSIS_GWAS, DIAGNOSIS, CHR, BP)
+# Import and format eQTL GWAS table
+eQTL_GWAS <- fread(TISSUE_eQTL_FILENAME)
+setnames(eQTL_GWAS, toupper(colnames(eQTL_GWAS)))
+setkey(eQTL_GWAS, CHR, BP)
+
+
+# Import and format NDD Cluster coordinate table
+COLOC_CLUSTERS <- fread(NDD_CLUSTERS_FILENAME)
+setkey(COLOC_CLUSTERS, GWAS, CHR, cluster)
+
+# Subset eQTLs to only regions of interest
+eQTL_GWAS <- foreach(CHROM=COLOC_CLUSTERS$CHR,
+        start=COLOC_CLUSTERS$extended_bp_start,
+        stop=COLOC_CLUSTERS$extended_bp_stop,
+        .combine='rbind', .errorhandling='remove') %do% {
+            eQTL_GWAS[.(CHROM)][BP %between% c(start, stop)]
+}
+setkey(eQTL_GWAS, CHR, BP)
+
+
+
+# Import and format NDD GWAS table
+NDD_GWAS <- fread(NDD_GWAS_FILENAME)
+setnames(NDD_GWAS, toupper(colnames(NDD_GWAS)))
+setkey(NDD_GWAS, CHR, BP)
+
+# Ensure eQTL alleles are polarized the same as NDD
+NDD_GWAS[, 'chr_snp' := paste0(CHR, '_', BP, '_', A1, '_', A2)]
+eQTL_GWAS[, 'chr_snp_rev' := paste0(CHR, '_', BP, '_', A2, '_', A1)]
+
+eQTL_GWAS[chr_snp_rev %in% NDD_GWAS$chr_snp, 'rev' := TRUE]
+eQTL_GWAS[rev==TRUE, B := -1*B]          # convert beta to other allele
+eQTL_GWAS[rev==TRUE, FREQ := 1-FREQ]     # convert freq to other allele
+eQTL_GWAS[rev==TRUE, a1 := A2]                               # rename
+eQTL_GWAS[rev==TRUE, a2 := A1]                               # rename
+eQTL_GWAS[rev==TRUE, A1 := a1]              # rename
+eQTL_GWAS[rev==TRUE, A2 := a2]              # rename
+eQTL_GWAS[, a1 := NULL]
+eQTL_GWAS[, a2 := NULL]
+eQTL_GWAS[, rev := NULL]
+eQTL_GWAS[, chr_snp_rev := NULL]
+
+eQTL_GWAS[, snpid := tstrsplit(SNP, split=':')[3]]
+eQTL_GWAS[, SNP := paste0(CHR, ':', BP, ':', snpid, ':', A1, '_', A2)]
+NDD_GWAS[, SNP := paste0(CHR, ':', BP, ':', SNP, ':', A1, '_', A2)]
+eQTL_GWAS[, snpid := NULL]
+NDD_GWAS[, chr_snp := NULL]
+
+eQTL_GWAS[, 'id' := paste0(CHR, '_', BP, '_', PROBE)]
+eQTL_GWAS[, 'rank' := frank(P), by=list(CHR,BP)]
 
 gc()
 
 
-
-COLOC_CLUSTERS_FILE <- '/gpfs/gsfs9/users/wellerca/sc-colocalization/data/clusters_extended.tsv'
-COLOC_CLUSTERS <- fread(COLOC_CLUSTERS_FILE)[cM_threshold==0.2][GWAS == diagnosis]
-setkey(COLOC_CLUSTERS, GWAS, CHR, cluster)
-
-COLOC_CLUSTERS[is.na(extended_bp_stop), 'extended_bp_stop' := 1e9]  # in case of NA end ranges, add sufficiently large value 
-COLOC_CLUSTERS[is.na(extended_bp_start), 'extended_bp_start' := 0]  # in case of NA end ranges, add start of chr
-
 run_coloc <- function(eQTL.DT, diagnosis.DT) {
-    d <- copy(diagnosis.DT)    # subset by chromosome
-    d[, SNP := paste0(CHR, '_', BP)]
+    d <- copy(diagnosis.DT)
     diagnosis <- list()
     diagnosis$position <- d$BP
     diagnosis$snp <- d$SNP
@@ -53,7 +83,6 @@ run_coloc <- function(eQTL.DT, diagnosis.DT) {
     diagnosis$type <- 'cc'
 
     e <- copy(eQTL.DT)
-    e[, SNP := paste0(CHR, '_', BP)]
     eQTL <- list()
     eQTL$position <- e$BP
     eQTL$snp <- e$SNP
@@ -68,43 +97,43 @@ run_coloc <- function(eQTL.DT, diagnosis.DT) {
     return(res)
 }
 
-# dt <- dt[dt[, .I[which.min(P)], by=list(CHR,BP)]$V1]    # Take most significant probe per SNP
+
 
 iteration <- 0
 
 # Init first run
+
 iteration <- iteration + 1
-dt.all <- foreach(diagnosis=COLOC_CLUSTERS$GWAS,
-        CHROM=COLOC_CLUSTERS$CHR,
+dt.all <- foreach(CHROM=COLOC_CLUSTERS$CHR,
         start=COLOC_CLUSTERS$extended_bp_start,
         stop=COLOC_CLUSTERS$extended_bp_stop,
         .combine='rbind', .errorhandling='remove') %do% {
-            diagnosis_gwas <- DIAGNOSIS_GWAS[.(diagnosis, CHROM)][BP %between% c(start, stop)]
-            eQTL_gwas <- eQTL_GWAS[.(tissue, CHROM)][rank==1 & BP %between% c(start, stop)]
-            coloc.dt <- run_coloc(eQTL_gwas, diagnosis_gwas)
-            coloc.dt[, 'diagnosis' := diagnosis]
-            coloc.dt[, 'TISSUE' := tissue]
+            ndd_gwas <- NDD_GWAS[.(CHROM)][BP %between% c(start, stop)]
+            eQTL_gwas <- eQTL_GWAS[.(CHROM)][rank==1 & BP %between% c(start, stop)]
+            coloc.dt <- run_coloc(eQTL_gwas, ndd_gwas)
             coloc.dt[, 'iteration' := iteration]
             return(coloc.dt)
 }
 
+if(is.null(dt.all)) {quit(status=0)}
+
 dt.all <- unique(dt.all)
 dt.all <- dt.all[SNP.PP.H4 > 0.9]
-dt.all[, c('CHR','BP') := tstrsplit(snp, split='_')]
+dt.all[, c('CHR','BP') := tstrsplit(snp, split=':')[1:2]]
 dt.all[, CHR := as.numeric(CHR)]
 dt.all[, BP := as.numeric(BP)]
-setkey(dt.all, TISSUE, CHR, BP)
+setkey(dt.all, CHR, BP)
 all_coloc_results <- dt.all
 
 
 
-d1 <- unique(dt.all[, .SD, .SDcols=c('CHR','BP','TISSUE')])
+d1 <- unique(dt.all[, .SD, .SDcols=c('CHR','BP')])
 d1 <- unique(merge(d1, eQTL_GWAS[rank==1]))
 d1[, 'iteration' := iteration]
 all_d1 <- d1
 
 eQTL_GWAS <- eQTL_GWAS[! id %in% d1$id]
-eQTL_GWAS[,'rank' := frank(P), by=list(CHR, BP, TISSUE)]    # Reset eQTL probe rank
+eQTL_GWAS[,'rank' := frank(P), by=list(CHR, BP)]    # Reset eQTL probe rank
 
 
 
@@ -113,16 +142,13 @@ eQTL_GWAS[,'rank' := frank(P), by=list(CHR, BP, TISSUE)]    # Reset eQTL probe r
 while(TRUE) {
 # Iterate through 6 times, at which point no more signif
     iteration <- iteration + 1
-    dt.all <- foreach(diagnosis=COLOC_CLUSTERS$GWAS,
-            CHROM=COLOC_CLUSTERS$CHR,
+    dt.all <- foreach(CHROM=COLOC_CLUSTERS$CHR,
             start=COLOC_CLUSTERS$extended_bp_start,
             stop=COLOC_CLUSTERS$extended_bp_stop,
             .combine='rbind', .errorhandling='remove') %do% {
-                diagnosis_gwas <- DIAGNOSIS_GWAS[.(diagnosis, CHROM)][BP %between% c(start, stop)]
-                eQTL_gwas <- eQTL_GWAS[.(tissue, CHROM)][rank==1 & BP %between% c(start, stop)]
+                diagnosis_gwas <- NDD_GWAS[.(CHROM)][BP %between% c(start, stop)]
+                eQTL_gwas <- eQTL_GWAS[.(CHROM)][rank==1 & BP %between% c(start, stop)]
                 coloc.dt <- run_coloc(eQTL_gwas, diagnosis_gwas)
-                coloc.dt[, 'diagnosis' := diagnosis]
-                coloc.dt[, 'TISSUE' := tissue]
                 coloc.dt[, 'iteration' := iteration]
                 return(coloc.dt)
     }
@@ -130,20 +156,20 @@ while(TRUE) {
     dt.all <- unique(dt.all)
     dt.all <- dt.all[SNP.PP.H4 > 0.9]
     if(nrow(dt.all)==0) {break}
-    dt.all[, c('CHR','BP') := tstrsplit(snp, split='_')]
+    dt.all[, c('CHR','BP') := tstrsplit(snp, split=':')[1:2]]
     dt.all[, CHR := as.numeric(CHR)]
     dt.all[, BP := as.numeric(BP)]
-    setkey(dt.all, TISSUE, CHR, BP)
+    setkey(dt.all, CHR, BP)
     all_coloc_results <- rbindlist(list(all_coloc_results, dt.all))
 
 
 
-    d1 <- unique(dt.all[, .SD, .SDcols=c('CHR','BP','TISSUE')])
+    d1 <- unique(dt.all[, .SD, .SDcols=c('CHR','BP')])
     d1 <- unique(merge(d1, eQTL_GWAS[rank==1]))
     d1[, 'iteration' := iteration]
     all_d1 <- rbindlist(list(all_d1, d1))
     eQTL_GWAS <- eQTL_GWAS[! id %in% d1$id]
-    eQTL_GWAS[,'rank' := frank(P), by=list(CHR, BP, TISSUE)]    # Reset eQTL probe rank
+    eQTL_GWAS[,'rank' := frank(P), by=list(CHR, BP)]    # Reset eQTL probe rank
 }
 
 
@@ -152,9 +178,28 @@ setkey(all_coloc_results, iteration, CHR, BP)
 setkey(all_d1, iteration, CHR, BP)
 
 dt.out <- merge(all_coloc_results, all_d1)
-fwrite(dt.out, file=paste0(diagnosis, '-', tissue, '-coloc.tsv'), quote=F, row.names=F, col.names=T, sep='\t')
+dt.out[, 'TISSUE' := TISSUE]
+dt.out[, 'NDD' := NDD]
+dt.out[, snp := NULL]
+
+fwrite(dt.out, file=paste0('data/coloc/', NDD, '-', TISSUE, '.tsv'), quote=F, row.names=F, col.names=T, sep='\t')
 
 quit(status=0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ###
