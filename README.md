@@ -1,6 +1,6 @@
 # sc-colocalization
 
-Generate full tissue eQTL GWAS files using [`submitSMR.sh`](src/submitSMR.sh). Importantly, the
+Generate full tissue eQTL GWAS files using [`retrieve-smr.sh`](src/retrieve-smr.sh). Importantly, the
 script calls a `smr-1.3.1` binary with `--descriptive-cis` `--beqtl-summary` to generate output,
 and `--query 1` to include
     
