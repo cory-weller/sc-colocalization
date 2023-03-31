@@ -58,7 +58,7 @@ wget -O ${RECOMBINATION_BED} https://storage.googleapis.com/broad-alkesgroup-pub
 NDD_FILES=($(ls data/NDD/*signif.tsv))
 
 for ndd_gwas in ${NDD_FILES[@]}; do
-    Rscript src/find_clusters.R ${ndd_gwas} ${RECOMBINATION_BED} ${cM_THRESHOLD}
+    Rscript src/find_clusters.R ${ndd_gwas} ${RECOMBINATION_BED}
 done
 ```
 
