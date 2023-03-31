@@ -77,6 +77,7 @@ done
 ```
 
 ## Combining results files
+Concatenating files
 ```bash
 OUTFILE='data/coloc/ALL_COLOC.tsv'
 INFILES=($(ls data/coloc/*.tsv))
@@ -90,6 +91,7 @@ for file in ${INFILES[@]}; do
 done
 ```
 
+Adding gene ID column
 ```R
 library(data.table)
 dat <- fread('data/coloc/ALL_COLOC.tsv')
@@ -101,102 +103,3 @@ desired_cols <- c('CHR','BP','NDD','TISSUE','GENEID','SNP.PP.H4','eQTL_B','PROBE
 dat.out <- dat[, .SD, .SDcols=desired_cols][order(CHR,BP,NDD,TISSUE)]
 fwrite(dat.out, file='coloc_formatted.tsv', quote=F, row.names=F, col.names=T, sep='\t')
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Generating filtered 
-```bash
-filterPvalByAwk() {
-    local infile=${1}
-    local p_val_column=${2}
-    local p_val_threshold=${3}
-    zcat ${infile} | \
-    awk -v col="${p_val_column}" \
-        -v threshold="${p_val_threshold}" \
-        'N == 1 || ($col + 0) < threshold'
-}
-
-datadir='/gpfs/gsfs9/users/CARD/projects/singlecell_humanbrain/coloc_20230322'
-
-
-# Filtering eQTL GWAS files to only include SNPs with P < 1E-4
-cd ~/sc-colocalization/data
-TISSUES=(Basalganglia-EUR Cerebellum-EUR Cortex-AFR Cortex-EUR Hippocampus-EUR Spinalcord-EUR)
-
-for tissue in ${TISSUES[@]}; do
-    for chr in $(seq 1 21); do
-        echo "$tissue chr${chr}"
-        filename=${datadir}/${tissue}_${chr}.tsv.gz
-        filterPvalByAwk ${filename} 14 '1E-4' >> ${tissue}.allChr.signif.tsv
-    done
-done
-
-gzip *.allChr.signif.tsv
-eQTL_filename <- paste0('', TISSUE, '.allChr.signif.tsv.gz')
-NDD_filename <- 
-```
-
-```bash
-
-
-```
-
-
-
-```
-
-```
-
-
-
-
-```
-awk -v col='14' \
-    -v threshold='1E-4' \
-    '($col + 0) < threshold' \
-    10_eQTL_all_SNPs.tsv | head
-
-./smr-1.3.1 --descriptive-cis --beqtl-summary /data/CARD/projects/omicSynth/SMR_omics/eQTLs/2020-05-26-Basalganglia-EUR/2020-05-26-Basalganglia-EUR-10-SMR-besd --out Basalganglia-EUR-10-
-```
-AD_Bellenguez.formatted.tsv.gz
-PD_Nalls.formatted.tsv.gz
-LBD_Chia.formatted.tsv.gz
-
-
-https://storage.googleapis.com/broad-alkesgroup-public/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
-
