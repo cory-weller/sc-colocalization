@@ -103,3 +103,40 @@ desired_cols <- c('CHR','BP','NDD','TISSUE','GENEID','SNP.PP.H4','eQTL_B','PROBE
 dat.out <- dat[, .SD, .SDcols=desired_cols][order(CHR,BP,NDD,TISSUE)]
 fwrite(dat.out, file='coloc_formatted.tsv', quote=F, row.names=F, col.names=T, sep='\t')
 ```
+
+Heat-map of hits
+```R
+library(data.table)
+library(ggthemes)
+library(ggplot2)
+dat <- fread('coloc_formatted.tsv')
+dat <- dat[!NDD %like% '_no']
+
+dat.ag <- dat[, .N, by=list(NDD, TISSUE, GENEID,CHR)][order(CHR,GENEID)]
+
+dat.wide <- dcast(dat.ag, TISSUE+GENEID+CHR~NDD, value.var='N')
+
+dat.wide[! is.na(AD_Bellenguez), AD := 'AD']
+dat.wide[! is.na(ALS_vanRheenen), ALS := 'ALS']
+dat.wide[! is.na(LBD_Chia), LBD := 'LBD']
+dat.wide[! is.na(PD_Nalls), PD := 'PD']
+dat.wide[, txtlbl := apply(.SD, 1, function(x) paste(x[!is.na(x)], collapse = ", ")), .SDcols=c('PD','AD','ALS','LBD')]
+dat.wide <- dat.wide[order(CHR,GENEID)]
+dat.wide[, 'HIT' := paste0('chr', CHR, ' ', GENEID)]
+
+dat.wide[, HIT := factor(HIT, levels=rev(unique(dat.wide$HIT)))]
+dat.wide[CHR%%2==0, bckgrnd := 0]
+dat.wide[CHR%%2==1, bckgrnd := 1]
+dat.wide[, bckgrnd := rleid(CHR)]
+dat.wide[, bckgrnd := factor(bckgrnd)]
+
+g <- ggplot(dat.wide, aes(x=TISSUE, y=HIT, label=txtlbl)) + 
+geom_tile(fill='gray90') +
+geom_text() +
+theme_few() +
+theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+
+ggsave(g, file='coloc_hits_table.png', height=35, width=20, units='cm')
+
+```
