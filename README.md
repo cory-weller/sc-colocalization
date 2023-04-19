@@ -89,6 +89,23 @@ head -n 1 ${INFILES[0]} > ${OUTFILE}
 for file in ${INFILES[@]}; do
     awk 'NR>1' ${file} >> ${OUTFILE}
 done
+
+
+```
+
+# Generate hit summary tables
+```R
+library(data.table)
+dat <- fread('data/coloc/ALL_COLOC.tsv')
+
+# 
+all_hits <- dcast(dat[, .N, by=list(NDD,TISSUE)], NDD~TISSUE)
+gene_hits <- dcast(dat[, .N, by=list(NDD,TISSUE,GENE)][, .N, by=list(NDD,TISSUE)], NDD~TISSUE)
+
+fwrite(all_hits, file='data/coloc/hit_all_summary.tsv', quote=F, row.names=F, col.names=T, sep='\t')
+fwrite(gene_hits, file='data/coloc/hit_gene_summary.tsv', quote=F, row.names=F, col.names=T, sep='\t')
+
+
 ```
 
 Adding gene ID column
